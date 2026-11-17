@@ -1,0 +1,126 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mangrove Guardian</title>
+<link rel=stylesheet href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"><script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script><style>
+:root{--g:#0f3326;--g2:#1d5a41;--sand:#efe6d2;--ink:#1b2a22;--lo:#3a9a68;--md:#d99a1e;--hi:#c4432c;--mut:#667a6f}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 Georgia,'Times New Roman',serif;background:var(--sand);color:var(--ink);display:flex;min-height:100vh}
+nav{width:196px;background:var(--g);color:#c9dfd2;padding:14px 0;flex-shrink:0;font-family:system-ui,sans-serif}
+nav h1{font:700 17px Georgia,serif;margin:0 14px 2px;color:#fff}nav p{margin:0 14px 12px;font-size:11px;color:#8fb3a0}
+nav a{display:block;padding:8px 14px;cursor:pointer}nav a.on{background:var(--g2);color:#fff;border-left:4px solid #e3c98b;padding-left:10px}
+main{flex:1;padding:16px;min-width:0;font-family:system-ui,sans-serif}h2{font:700 22px Georgia,serif;margin:0 0 10px}h3{margin:0 0 6px;font:700 15px Georgia,serif}
+.card{background:#fffdf7;border-radius:6px;padding:12px;margin-bottom:12px;border:1px solid #0f332622}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:250px}.row.k>*{min-width:120px}
+.kpi b{font:700 24px Georgia,serif;display:block}
+.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:3px}
+.cell{aspect-ratio:1.3;border-radius:4px;color:#fff;font-weight:700;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;font-size:12px;border:3px solid transparent}
+.cell.sel{border-color:#111}.cell small{color:#fff;font-weight:400}
+table{width:100%;border-collapse:collapse}td,th{padding:5px;border-bottom:1px solid #0001;text-align:left;font-size:13px}
+button,select,input[type=range]{font:inherit}button,select{padding:6px 10px;border-radius:5px;border:1px solid var(--g2);background:var(--g2);color:#fff;cursor:pointer;margin:2px}
+button.o,select{background:#fff;color:var(--g2)}button:disabled{opacity:.5}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #e3c98b}
+.bar{height:9px;background:#0001;border-radius:5px;flex:1}.bar i{display:block;height:100%;border-radius:5px}
+.f{display:flex;align-items:center;gap:8px;margin:4px 0}.f span{width:150px;font-size:13px}
+.tag{padding:2px 8px;border-radius:9px;color:#fff;font-size:12px}.lo{background:var(--lo)}.md{background:var(--md)}.hi{background:var(--hi)}
+small,.m{color:var(--mut)}.warn{font-size:12px;color:#7a5a12;background:#f7ecc8;padding:6px 8px;border-radius:4px}
+canvas{width:100%;max-width:700px;background:#dfeee6;border-radius:6px}
+@media(max-width:720px){body{flex-direction:column}nav{width:auto;display:flex;overflow-x:auto}nav h1,nav p{display:none}nav a{white-space:nowrap}}
+</style></head><body>
+<nav id="nav"><h1>Mangrove Guardian</h1><p>Restoration decision support</p></nav><main id="main"></main>
+<script>
+const $=i=>document.getElementById(i),sig=z=>1/(1+Math.exp(-z)),R=Math.round,today=new Date().toISOString().slice(0,10);
+let seed=7;const rnd=()=>(seed=seed*16807%2147483647)/2147483647,gs=()=>(rnd()+rnd()+rnd()+rnd()-2)*1.2;
+const F=[['dNdvi','NDVI change'],['sal','Porewater salinity'],['o2','Dissolved oxygen'],['inund','Tidal inundation'],['healthy','Healthy-tree %'],['surv','Seedling survival'],['graz','Grazing']];
+/* ---- AI: synthetic training data -> logistic model (exact linear SHAP) ---- */
+function genRow(s=rnd(),h=rnd()){const gz=rnd()<.08+.3*s?1:0;
+ const r={dNdvi:-.22*s+.03*gs(),sal:40+35*s+4*gs(),o2:6-3*s+.4*gs(),inund:Math.max(.5,7-5*h+.5*gs()),healthy:Math.min(99,92-45*s+5*gs()),surv:Math.min(99,92-40*s-10*h+5*gs()),graz:gz};
+ r.y=rnd()<sig(5*(.55*s+.45*h-.5)+1.2*gz)?1:0;return r}
+const mu=[],sd=[];let W=[],B=0,ACC=0;
+function train(){const D=Array.from({length:700},()=>genRow()),X=D.map(r=>F.map(f=>r[f[0]]));
+ F.forEach((f,j)=>{const c=X.map(x=>x[j]);mu[j]=c.reduce((a,v)=>a+v)/c.length;sd[j]=Math.sqrt(c.reduce((a,v)=>a+(v-mu[j])**2,0)/c.length)||1});
+ const Z=X.map(x=>x.map((v,j)=>(v-mu[j])/sd[j])),n=560;W=F.map(()=>0);B=0;
+ for(let e=0;e<500;e++){const gw=F.map(()=>0);let gb=0;for(let i=0;i<n;i++){const p=sig(Z[i].reduce((a,v,j)=>a+v*W[j],B))-D[i].y;Z[i].forEach((v,j)=>gw[j]+=p*v);gb+=p}W=W.map((w,j)=>w-.5*(gw[j]/n+.01*w));B-=.5*gb/n}
+ let ok=0;for(let i=n;i<700;i++)ok+=(sig(Z[i].reduce((a,v,j)=>a+v*W[j],B))>.5)==D[i].y;ACC=ok/140}
+function pred(g){const z=F.map((f,j)=>(g[f[0]]-mu[j])/sd[j]),c=z.map((v,j)=>W[j]*v);return{p:sig(B+c.reduce((a,v)=>a+v,0)),c}}
+const cls=p=>p<.36?'lo':p<.66?'md':'hi',lab=p=>p<.36?'Low':p<.66?'Medium':'High',tg=p=>`<span class="tag ${cls(p)}">${lab(p)} ${R(p*100)}%</span>`;
+/* ---- Simulated grid data ---- */
+const G=[];'ABCD'.split('').forEach((L,r)=>{for(let c=0;c<6;c++){const id=L+(c+1);let s=rnd(),h=rnd();
+ if(id=='B3'){s=.9;h=.8}if(id=='C4'){s=.8;h=.7}if(id=='A3'){s=.5;h=.5}if(id=='A1'){s=.1;h=.1}
+ const g=Object.assign(genRow(s,h),{id,r,c,zone:L});
+ g.ex=R(20+30*rnd());g.pl=R(100+60*rnd());g.temp=+(30+5*s).toFixed(1);g.ph=+(7.2+.6*s+.1*gs()).toFixed(1);g.redox=R(-30-70*s);g.crab=R(35*(1-s)+5*rnd());
+ g.insp=!(id=='B3'||id=='C4'||id=='D2'||rnd()<.3);g.last=g.insp?'2026-11-0'+(1+R(rnd()*7)):'Never';
+ g.ser=Array.from({length:30},(_,i)=>+(g.sal*(1-.1*s*(29-i)/29)+.8*gs()).toFixed(1));G.push(g)}});
+train();
+const upd=()=>G.forEach(g=>{const o=pred(g);g.p=o.p;g.c=o.c});upd();
+const alive=g=>R(g.pl*g.surv/100),liv=g=>g.ex+alive(g),avg=k=>G.reduce((a,g)=>a+g[k],0)/G.length,gr=()=>G.find(g=>g.id==S.sel);
+const dead=g=>R((100-g.healthy)*.4),sick=g=>R((100-g.healthy)*.45),grazed=g=>Math.max(0,R(100-g.healthy)-dead(g)-sick(g));
+function recs(g){const r=[];if(g.p<.36&&g.dNdvi>-.06)return['Natural recovery looks on track: protect the area and keep monitoring. No planting needed.'];
+ if(g.inund<4)r.push('Investigate tidal inundation and water circulation before any replanting.');
+ if(g.graz)r.push('Grazing detected: consider protective barriers.');
+ if(g.sal>65)r.push('Verify porewater salinity with a repeat field sample (refractometer).');
+ if(g.surv<65)r.push('Find the cause of seedling mortality before deciding on replacement.');
+ if(g.healthy<60)r.push('Request a specialist pest and disease inspection.');
+ return r.length?r:['Routine monitoring; inspect at the next scheduled survey.']}
+/* ---- State ---- */
+const S={stage:2,view:null,page:'overview',sel:'B3',layer:'risk',angle:30,when:'now',act:{},log:[],drone:{x:0,y:4.2,batt:78,status:'Parked',tgt:'-',alt:0,spd:0,mission:'None'}};
+const hue=v=>`hsl(${R(125-125*Math.max(0,Math.min(1,v)))},55%,40%)`;
+const LAY={risk:g=>g.p,ndvi:g=>-g.dNdvi/.25,sal:g=>(g.sal-40)/40,inund:g=>(7-g.inund)/5};
+const LV={risk:g=>R(g.p*100)+'%',ndvi:g=>g.dNdvi.toFixed(2),sal:g=>R(g.sal)+' ppt',inund:g=>g.inund.toFixed(1)+' h',insp:g=>g.insp?'seen':'pending'};
+function map(l){return `<div class=grid>${G.map(g=>`<div class="cell ${g.id==S.sel?'sel':''}" tabindex=0 style="background:${l=='insp'?(g.insp?'#3a9a68':'#8a958f'):hue(LAY[l](g))}" onclick="pick('${g.id}')">${S.drone.tgt==g.id&&S.drone.status=='Flying'?'🚁 ':''}${g.id}<small>${LV[l](g)}</small></div>`).join('')}</div>`}
+const spark=(a,c='#1d5a41',w=240,h=54)=>{const lo=Math.min(...a),hi=Math.max(...a)||1,d=hi-lo||1;return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="${c}" stroke-width="2" points="${a.map((v,i)=>`${i*w/(a.length-1)},${h-4-(v-lo)/d*(h-8)}`).join(' ')}"/></svg>`};
+const gsel=()=>`<select aria-label="Grid" onchange="pick(this.value)">${G.map(g=>`<option ${g.id==S.sel?'selected':''}>${g.id}</option>`).join('')}</select>`;
+const bars=(items)=>items.map(([n,v,c])=>`<div class=f><span>${n}</span><div class=bar><i style="width:${Math.min(100,Math.abs(v))}%;background:${c}"></i></div><small>${typeof v=='number'?R(v):v}</small></div>`).join('');
+/* ---- Pages ---- */
+const P={
+overview:()=>{const n=G.length,k=x=>R(100*G.filter(g=>cls(g.p)==x).length/n),top=[...G].sort((a,b)=>b.p-a.p).slice(0,5);
+ return `<h2>Overview</h2><div class="row k">${[['Monitored area','120 ha'],['Living mangroves',G.reduce((a,g)=>a+liv(g),0).toLocaleString()],['Avg seedling survival',R(avg('surv'))+'%'],['Low-risk cells',k('lo')+'%'],['Medium risk',k('md')+'%'],['High risk',k('hi')+'%']].map(([a,b])=>`<div class="card kpi"><small>${a}</small><b>${b}</b></div>`).join('')}</div>
+ <div class=row><div class=card style="flex:2"><h3>Risk map (click a cell)</h3>${map('risk')}</div><div class=card><h3>Needs attention</h3><table>${top.map(g=>`<tr><td>${g.id}</td><td>${tg(g.p)}</td><td><small>${g.insp?'inspected '+g.last:'drone pending'}</small></td></tr>`).join('')}</table></div></div>
+ <div class=row><div class=card><h3>Avg survival (12 months, simulated)</h3>${spark([95,93,91,89,88,86,85,84,83,83,82,R(avg('surv'))])}</div><div class=card><h3>Avg salinity, last 30 days (ppt)</h3>${spark(G[0].ser.map((_,i)=>G.reduce((a,g)=>a+g.ser[i],0)/G.length))}</div></div>
+ <p class=warn>All data are simulated for demonstration. Risk values come from a prototype model trained on synthetic data.</p>`},
+explorer:()=>{const g=gr();return `<h2>GIS Forest Explorer</h2><div class=row><div class=card style="flex:2"><p>Layer: <select onchange="S.layer=this.value;render()">${[['risk','AI risk'],['ndvi','NDVI decline'],['sal','Salinity'],['inund','Low inundation'],['insp','Drone inspection'],['trees','Living trees']].map(([v,t])=>`<option value=${v} ${S.layer==v?'selected':''}>${t}</option>`).join('')}</select> <small>Esri World Imagery. Grid position is a placeholder: set LAT0/LON0 in the script to your site.</small></p><p>Date: <select onchange="S.stage=+this.value;render()">${['Before restoration','Post-seeding','Now'].map((t,i)=>`<option value=${i} ${S.stage==i?'selected':''}>${t}</option>`).join('')}</select> <small>Changes the Living trees layer; imagery is Esri's current mosaic.</small></p><div id=lm style="height:400px;border-radius:6px"></div></div>
+ <div class=card><h3>Grid ${g.id} ${tg(g.p)}</h3><table>${[['Trees (living)',liv(g)],['Healthy / sick / grazed / dead',`${R(g.healthy)} / ${sick(g)} / ${grazed(g)} / ${dead(g)} %`],['Salinity',R(g.sal)+' ppt'],['pH',g.ph],['Conductivity',R(g.sal*1.4)+' mS/cm'],['Temp',g.temp+' °C'],['Dissolved O₂',g.o2.toFixed(1)+' mg/L'],['Inundation',g.inund.toFixed(1)+' h/tide'],['Drone inspection',g.insp?'Completed '+g.last:'Pending']].map(([a,b])=>`<tr><td>${a}</td><td>${b}</td></tr>`).join('')}</table><button onclick="S.page='ai';render()">AI analysis</button></div></div>`},
+'3d':()=>`<h2>3D Forest</h2><div class=card><p>Rotate <input type=range min=0 max=360 value=${S.angle} oninput="S.angle=+this.value;draw3d()" aria-label="Rotate"> <select onchange="S.when=this.value;draw3d()"><option value=now ${S.when=='now'?'selected':''}>Now</option><option value=before ${S.when=='before'?'selected':''}>Before restoration</option></select></p><canvas id=c3 width=700 height=420></canvas><p><small>Block height = ground elevation proxy. Colour = AI risk. Green dots = trees. 🚁 = drone. Illustrative, not a surveyed terrain model.</small></p></div>`,
+surveys:()=>`<h2>Surveys &amp; restoration progress</h2><div class=card><h3>Before / after per grid</h3><div style="overflow-x:auto"><table><tr><th>Grid<th>Existing trees<th>Planted<th>Alive<th>Survival<th>Living total</tr>${G.map(g=>`<tr><td>${g.id}<td>${g.ex}<td>${g.pl}<td>${alive(g)}<td>${R(g.surv)}%<td>${liv(g)}</tr>`).join('')}</table></div><small>Original trees and planted seedlings are counted separately. Survival = living ÷ planted × 100.</small></div>
+ <div class=row><div class=card><h3>Control comparison (BACI)</h3><p>Undisturbed 10×10 m control plot: <b>stable</b> canopy (NDVI change 0.00). Restoration grids average NDVI change <b>${avg('dNdvi').toFixed(2)}</b>, so part of the change may be regional, not caused by the project.</p></div><div class=card><h3>EAD monitoring calendar</h3><small>Weekly for 4 weeks → monthly for 5 months → every 2 months → quarterly site surveys → follow-ups at years 2.5, 5 and 10. Plots: 30×30 m main with 3×3 m nested.</small></div></div>`,
+ai:()=>{const g=gr(),c=F.map((f,j)=>[f[1],g.c[j]]).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,5);
+ return `<h2>AI degradation-risk analysis</h2><div class=row><div class=card><p>Grid ${gsel()}</p><b style="font:700 40px Georgia">${R(g.p*100)}%</b> ${tg(g.p)}<h3>Contributing factors (log-odds)</h3>${bars(c.map(([n,v])=>[(v>0?'↑ ':'↓ ')+n,v*40,v>0?'var(--hi)':'var(--lo)']))}<p>${g.p>=.36?`Several indicators are associated with degradation (top: ${c.filter(x=>x[1]>0).slice(0,3).map(x=>x[0].toLowerCase()).join(', ')}). This points to investigation, not a diagnosis.`:'Indicators are broadly stable.'}</p></div>
+ <div class=card><h3>Suggested next steps</h3><ul>${recs(g).map(r=>`<li>${r}</li>`).join('')}</ul><h3>What-if</h3><p>Inundation <input id=wi1 type=range min=1 max=8 step=.5 value=${g.inund.toFixed(1)} oninput="wi()"> Salinity <input id=wi2 type=range min=35 max=85 value=${R(g.sal)} oninput="wi()"></p><p id=wiv></p><h3>Experimental 3 and 6 month scenario</h3><p>${[3,6].map(m=>`${m} mo: <b>${R(fc(g,m)*100)}%</b>`).join(' · ')}</p><small>Extends this grid's recent salinity, NDVI and survival trends through the same model. A scenario, not a validated forecast.</small>
+ <p class=warn>Model: logistic regression trained in your browser on 560 synthetic grid records; held-out accuracy ${R(ACC*100)}% on synthetic data only. It is not validated on real mangroves. Contributions are exact linear SHAP values and show model behaviour, not causation.</p></div></div>`},
+drone:()=>{const D=S.drone,q=G.filter(g=>!g.insp).sort((a,b)=>b.p-a.p).slice(0,4);
+ return `<h2>Drone operations (simulated)</h2><div class=row><div class=card><h3>Drone 01 <span class="tag ${D.status=='Flying'?'md':'lo'}">${D.status}</span></h3><table>${[['Battery',R(D.batt)+'%'],['Mission',D.mission],['Target grid',D.tgt],['Altitude',D.alt+' m'],['Speed',D.spd+' m/s'],['GPS',(24.45+D.y*.002).toFixed(4)+', '+(54.38+D.x*.002).toFixed(4)],['Payload','RGB + thermal OK; sensor pod OK']].map(([a,b])=>`<tr><td>${a}<td>${b}`).join('')}</table><button onclick="mission()" ${D.status!='Parked'||!q.length?'disabled':''}>Run drone mission</button><button class=o onclick="S.drone.batt=100;render()">Recharge</button></div>
+ <div class=card><h3>Pending inspections (by AI priority)</h3><table><tr><th>Grid<th>Risk<th>ETA</tr>${q.map(g=>`<tr><td>${g.id}<td>${tg(g.p)}<td>${R(Math.hypot(g.c-D.x,g.r-D.y)*6)} s`).join('')||'<tr><td>All grids inspected'}</table><small>Cameras capture imagery; porewater readings come from contact sensors or a field team, simulated here.</small></div></div>
+ <div class=card><h3>Map</h3>${map('insp')}</div><div class=card><h3>Event log</h3>${S.log.map(l=>`<div>${l}</div>`).join('')||'<small>Run a mission to see the loop: inspect → new readings → AI re-scores → work order.</small>'}</div>`},
+sensors:()=>{const g=gr(),row=G.filter(x=>x.zone==g.zone);return `<h2>Soil &amp; water sensors</h2><p>Grid ${gsel()}</p><div class="row k">${[['Salinity',R(g.sal)+' ppt'],['pH',g.ph],['Conductivity',R(g.sal*1.4)+' mS/cm'],['Temp',g.temp+' °C'],['Dissolved O₂',g.o2.toFixed(1)+' mg/L'],['Redox',g.redox+' mV']].map(([a,b])=>`<div class="card kpi"><small>${a}</small><b>${b}</b></div>`).join('')}</div><small>Last reading ${g.last=='Never'?'baseline survey':g.last}; sensor quality: calibrated (simulated). No pass/fail thresholds are applied: reference ranges must be set locally.</small>
+ <div class=card><h3>Salinity, 30 days, row ${g.zone} comparison</h3><div class=row>${row.map(x=>`<div>${x.id} ${spark(x.ser,x.id==g.id?'#c4432c':'#1d5a41',150,40)}</div>`).join('')}</div></div>`},
+actions:()=>{const l=[...G].filter(g=>g.p>=.36).sort((a,b)=>b.p-a.p);return `<h2>Action centre</h2><p class=warn>AI prioritises and suggests. Qualified specialists approve every intervention.</p>${l.map(g=>`<div class=card><h3>Grid ${g.id} ${tg(g.p)} <small>${S.act[g.id]||'Awaiting decision'}</small></h3><ul>${recs(g).map(r=>`<li>${r}</li>`).join('')}</ul>${[['Accept','Accepted'],['Reject','Rejected'],['Request investigation','Further investigation requested'],['Assign crew','Crew A assigned, due '+new Date(Date.now()+7*864e5).toISOString().slice(0,10)]].map(([a,b])=>`<button class=o onclick="S.act['${g.id}']='${b}';render()">${a}</button>`).join('')}</div>`).join('')}`},
+bio:()=>`<h2>Biodiversity (demonstration data)</h2><div class=card><h3>Crab burrow counts per grid</h3>${bars(G.map(g=>[g.id,g.crab*2.5,'#1d5a41']))}<small>Crabs recycle leaf litter and aerate sediment. Lower counts in high-risk grids are simulated.</small></div><div class=card><table><tr><th>Group<th>Method<th>Trend</tr><tr><td>Birds<td>Visual + acoustic<td>Stable</tr><tr><td>Fish<td>Field survey<td>Stable</tr><tr><td>Gastropods<td>Trail counts<td>Declining in high-risk grids</tr><tr><td>Bats<td>Acoustic detectors<td>Not surveyed</tr></table></div>`,
+reports:()=>`<h2>Reports</h2><div class=card><h3>Restoration performance by zone</h3><table><tr><th>Zone<th>Survival<th>High-risk cells<th>Status</tr>${'ABCD'.split('').map(z=>{const x=G.filter(g=>g.zone==z),sv=x.reduce((a,g)=>a+g.surv,0)/6,hr=R(100*x.filter(g=>g.p>=.66).length/6);return `<tr><td>${z}<td>${R(sv)}%<td>${hr}%<td>${hr>30||sv<60?'Critical':hr>10||sv<75?'Needs attention':'Good'}`}).join('')}</table><button onclick="csv()">Download grid CSV</button><button class=o onclick="print()">Print report</button><p><b>Load your own data</b> (CSV columns: id, sal, ph, temp, o2, inund, healthy, surv, dNdvi, graz): <input type=file accept=.csv onchange="loadCsv(this.files[0])"></p><p class=warn>Replaces simulated values; the model then re-scores every grid.</p></div>`};
+const NAV=[['overview','Overview'],['explorer','GIS Explorer'],['3d','3D Forest'],['surveys','Surveys'],['ai','AI Risk'],['drone','Drone Ops'],['sensors','Sensors'],['actions','Action Centre'],['bio','Biodiversity'],['reports','Reports']];
+function render(){$('nav').innerHTML=$('nav').innerHTML.split('<a')[0]+NAV.map(([k,t])=>`<a tabindex=0 class="${S.page==k?'on':''}" onclick="S.page='${k}';render()">${t}</a>`).join('');$('main').innerHTML=P[S.page]();if(S.page=='3d')draw3d();if(S.page=='ai')wi();if(S.page=='explorer')lmap()}
+const pick=id=>{S.sel=id;render()};
+function wi(){const g=gr(),a=+$('wi1').value,s=+$('wi2').value;$('wiv').innerHTML=`Inundation ${a} h, salinity ${s} ppt → risk <b>${R(pred({...g,inund:a,sal:s}).p*100)}%</b>`}
+function csv(){const k=['id','zone','p','sal','ph','temp','o2','inund','healthy','surv','dNdvi','insp'],t=k.join()+'\n'+G.map(g=>k.map(x=>typeof g[x]=='number'?+g[x].toFixed(3):g[x]).join()).join('\n'),a=document.createElement('a');a.href=URL.createObjectURL(new Blob([t],{type:'text/csv'}));a.download='mangrove_grids.csv';a.click()}
+/* ---- Drone simulation: fly -> inspect -> re-score -> work order ---- */
+function mission(){const D=S.drone,g=G.filter(x=>!x.insp).sort((a,b)=>b.p-a.p)[0];if(!g||D.status!='Parked')return;
+ D.status='Flying';D.tgt=g.id;D.mission='Inspection';D.alt=35;D.spd=12;const sx=D.x,sy=D.y,tx=g.c+.5,ty=g.r+.5;let t=0;S.log.unshift(`Drone 01 dispatched to ${g.id} (risk ${R(g.p*100)}%).`);
+ const iv=setInterval(()=>{t++;D.x=sx+(tx-sx)*t/30;D.y=sy+(ty-sy)*t/30;D.batt-=.35;if(t>=30){clearInterval(iv);arrive(g)}render()},100)}
+function arrive(g){const D=S.drone,old=g.p;g.insp=true;g.last=today;g.sal+=gs()*2+(g.p>.5?3:0);g.o2-=g.p>.5?.3:0;g.ser.push(+g.sal.toFixed(1));g.ser.shift();const o=pred(g);g.p=o.p;g.c=o.c;
+ S.log.unshift(`${g.id} inspected: RGB + thermal captured, sensor readings uploaded. AI risk ${R(old*100)}% → ${R(g.p*100)}%. Work order created in Action Centre.`);S.act[g.id]='Awaiting decision';
+ D.status='Returning to base';D.tgt='Base';let t=0;const sx=D.x,sy=D.y,iv=setInterval(()=>{t++;D.x=sx*(1-t/25);D.y=sy+(4.2-sy)*t/25;D.batt-=.2;if(t>=25){clearInterval(iv);D.status='Parked';D.alt=0;D.spd=0;D.mission='None';D.tgt='-'}render()},100)}
+const LAT0=24.523,LON0=54.420,DG=.002;let LM;
+const tcount=(g,s)=>[g.ex,g.ex+g.pl,liv(g)][s];
+const fc=(g,m)=>{const sl=(g.ser[29]-g.ser[0])/29;return pred({...g,sal:Math.min(90,g.sal+sl*30*m),dNdvi:g.dNdvi*(1+m/6),surv:g.surv-m*g.p*3}).p};
+function loadCsv(f){f&&f.text().then(t=>{const[h,...Ls]=t.trim().split(/\r?\n/),k=h.split(',').map(x=>x.trim());let n=0;Ls.forEach(l=>{const v=l.split(','),g=G.find(x=>x.id==v[k.indexOf('id')]);if(!g)return;n++;k.forEach((c,i)=>{if(['sal','ph','temp','o2','inund','healthy','surv','dNdvi','graz'].includes(c)&&v[i]!=='')g[c]=+v[i]});g.ser[29]=g.sal});upd();alert(n+' grids updated');render()})}
+function lmap(){const el=$('lm');if(!el)return;if(typeof L=='undefined'){el.innerHTML='<p class=warn>Map library could not load (offline or blocked).</p>';return}
+ try{LM&&LM.remove()}catch(e){}LM=L.map(el);L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Imagery © Esri'}).addTo(LM);const l=S.layer;
+ G.forEach(g=>{const b=[[LAT0-g.r*DG-DG,LON0+g.c*DG],[LAT0-g.r*DG,LON0+(g.c+1)*DG]],v=l=='trees'?1-tcount(g,S.stage)/120:l=='insp'?(g.insp?0:.9):LAY[l](g),
+  r=L.rectangle(b,{color:g.id==S.sel?'#000':'#fff',weight:g.id==S.sel?3:1,fillColor:hue(v),fillOpacity:.55}).addTo(LM);
+  r.bindTooltip(g.id+' · '+(l=='trees'?tcount(g,S.stage)+' trees':l=='insp'?(g.insp?'inspected':'pending'):LV[l](g)),{permanent:true,direction:'center'});r.on('click',()=>pick(g.id))});
+ S.view?LM.setView(S.view[0],S.view[1]):LM.fitBounds([[LAT0-4*DG,LON0],[LAT0,LON0+6*DG]]);LM.on('moveend',()=>S.view=[LM.getCenter(),LM.getZoom()])}
+/* ---- 3D isometric view ---- */
+function draw3d(){const c=$('c3');if(!c)return;const x=c.getContext('2d'),a=S.angle*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);x.clearRect(0,0,700,420);
+ const pr=(gx,gy,h)=>{const X=gx-3,Y=gy-2,rx=X*ca-Y*sa,ry=X*sa+Y*ca;return[350+rx*72,215+ry*34-h,ry]};
+ [...G].sort((p,q)=>pr(p.c+.5,p.r+.5,0)[2]-pr(q.c+.5,q.r+.5,0)[2]).forEach(g=>{const h=8+g.inund*3,co=[[0,0],[1,0],[1,1],[0,1]].map(([i,j])=>[g.c+i,g.r+j]);
+  for(let e=0;e<4;e++){const A=co[e],B2=co[(e+1)%4];x.beginPath();[pr(...A,0),pr(...B2,0),pr(...B2,h),pr(...A,h)].forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1]));x.fillStyle='#0004';x.fill()}
+  x.beginPath();co.forEach((q,i)=>{const p=pr(...q,h);i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1])});x.closePath();x.fillStyle=hue(g.p);x.fill();x.strokeStyle='#fff8';x.stroke();
+  const n=Math.round((S.when=='now'?liv(g):g.ex)/9);x.fillStyle='#0b5a2a';for(let i=0;i<n;i++){const p=pr(g.c+((i*37%10)+.5)/11,g.r+((i*53%10)+.5)/11,h);x.beginPath();x.arc(p[0],p[1]-3,2.6,0,7);x.fill()}
+  const D=S.drone;if(Math.hypot(D.x-g.c-.5,D.y-g.r-.5)<.55&&D.status!='Parked'){const p=pr(D.x,D.y,h+30);x.font='20px sans-serif';x.fillText('🚁',p[0]-10,p[1])}});
+ const p=pr(S.drone.x,S.drone.y,20);if(S.drone.status=='Parked'){x.font='20px sans-serif';x.fillText('🚁',p[0]-10,p[1])}}
+render();
+</script></body></html>

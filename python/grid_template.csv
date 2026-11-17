@@ -1,0 +1,3 @@
+grid_id,site,survey_date,ndvi_change,ndre,ndmi,salinity_ppt,dissolved_oxygen_mg_l,soil_ph,inundation_hours,healthy_tree_pct,seedling_survival_pct,grazing_detected,future_deterioration
+EXAMPLE-ROW-1,1,2026-10-01,-0.02,0.38,0.29,42,5.4,7.6,6,90,88,0,0
+EXAMPLE-ROW-2,1,2026-10-01,-0.18,0.30,0.21,68,3.1,7.8,2,55,52,1,1
